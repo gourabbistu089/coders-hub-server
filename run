@@ -1,0 +1,66 @@
+#!/bin/bash
+
+# Check if script is running as root
+if [ "$EUID" -ne 0 ]; then
+  echo "Please run as root or with sudo"
+  exit 1
+fi
+
+# Install PM2 globally if not already installed
+if ! command -v pm2 &> /dev/null; then
+    echo "Installing PM2..."
+    npm install -g pm2
+fi
+
+# Start the Node.js application with PM2
+echo "Starting Node.js application with PM2..."
+cd /path/to/your/app  # Replace with your application path
+pm2 delete coders-hub-server 2>/dev/null || true  # Delete if exists
+pm2 start npm --name coders-hub-server -- start
+
+# Configure Nginx
+echo "Configuring Nginx..."
+cat > /etc/nginx/sites-available/default << 'EOL'
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+
+    root /var/www/html;
+    index index.html index.htm index.nginx-debian.html;
+
+    server_name _;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    location /api/ {
+        proxy_pass http://localhost:3000/;  # Pass the request to the Node.js app
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+EOL
+
+# Test Nginx configuration
+echo "Testing Nginx configuration..."
+nginx -t
+
+if [ $? -eq 0 ]; then
+    # Reload Nginx to apply changes
+    echo "Reloading Nginx..."
+    systemctl reload nginx
+    echo "Setup completed successfully!"
+else
+    echo "Nginx configuration test failed. Please check the configuration."
+    exit 1
+fi
+
+# Save PM2 configuration to start on reboot
+echo "Saving PM2 configuration to start on system boot..."
+pm2 save
+pm2 startup | tail -n 1
+echo "Setup complete!"
